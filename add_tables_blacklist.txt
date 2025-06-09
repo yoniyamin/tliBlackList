@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""
+add_tables_blacklist.py
+
+Given:
+  --pattern <schema>.<table_pattern>                (e.g. "public.%")
+  --exclude-csv <path/to/exclude.csv>               (first column=schema, second=table_name)
+  [--exclude-action {merge,replace}]                (default: replace)
+  [--explicit-csv <path/to/explicit.csv>]           (same two‐column format as exclude)
+  [--explicit-action {merge,replace}]               (default: replace)
+  --csv-has-headers                                  (treat both CSVs as having a header row; default: headerless)
+  --json-input <path/to/task.json>                  (the replication‐task JSON to modify)
+  --json-output <path/to/output.json>               (where to write the new JSON)
+
+This will:
+  1) Parse --pattern into owner/name and set “included_pattern” = [{ "owner": <schema>, "name": <pattern> }].
+  2) Read exclude‐CSV, turn each row into { "owner": <schema>, "name": <table_name>, "load_order": -1 }, then
+     either replace or merge into cmd.replication_definition.tasks[0].source.source_tables.excluded_pattern.
+  3) (Optionally) read explicit‐CSV and do the same for cmd.replication_definition.tasks[0].source.source_tables.explicit_included_tables.
+  4) Preserve everything else in the JSON, and write to --json-output.
+
+Usage example:
+  python3 add_tables_blacklist.py \
+    --pattern public.% \
+    --exclude-csv path/to/blacklist.csv \
+    --exclude-action merge \
+    --explicit-csv path/to/whitelist.csv \
+    --explicit-action replace \
+    --csv-has-headers \
+    --json-input input_task.json \
+    --json-output updated_task.json
+"""
+
+import csv
+import json
+import argparse
+import sys
+
+
+def load_csv_as_list_of_dicts(csv_path, has_headers):
+    """
+    Read a two‐column CSV (schema, table_name). If has_headers=True, uses DictReader
+    (first row is treated as column names). Otherwise expects exactly two columns
+    per line with no header row.
+    Returns a list of {"owner": ..., "name": ...}.
+    """
+    rows = []
+    with open(csv_path, newline='', encoding='utf-8') as f:
+        if has_headers:
+            reader = csv.DictReader(f)
+            headers = [h.strip() for h in reader.fieldnames]
+            if len(headers) < 2:
+                raise ValueError(
+                    f"Expected at least two columns in {csv_path}, found: {headers}"
+                )
+            for r in reader:
+                owner = r[headers[0]].strip()
+                name = r[headers[1]].strip()
+                if owner and name:
+                    rows.append({"owner": owner, "name": name})
+        else:
+            reader = csv.reader(f)
+            for r in reader:
+                if len(r) < 2:
+                    continue
+                owner = r[0].strip()
+                name = r[1].strip()
+                if owner and name:
+                    rows.append({"owner": owner, "name": name})
+    return rows
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Add a blacklist (excluded_pattern) to an existing replication‐task JSON."
+    )
+    parser.add_argument(
+        "--pattern",
+        required=True,
+        help="Schema + table‐pattern for included_pattern, e.g. public.%",
+    )
+    parser.add_argument(
+        "--exclude-csv",
+        required=True,
+        help="Path to CSV of tables to exclude (first column=schema, second=table_name)."
+    )
+    parser.add_argument(
+        "--exclude-action",
+        choices=["merge", "replace"],
+        default="replace",
+        help="Whether to merge into existing excluded_pattern or replace it. Default: replace."
+    )
+    parser.add_argument(
+        "--explicit-csv",
+        help="(Optional) Path to CSV of explicit tables to include (same two‐column format)."
+    )
+    parser.add_argument(
+        "--explicit-action",
+        choices=["merge", "replace"],
+        default="replace",
+        help="Whether to merge explicit tables into existing explicit_included_tables or replace. Default: replace."
+    )
+    parser.add_argument(
+        "--csv-has-headers",
+        action="store_true",
+        help="If set, treat both CSV files as having a header row; otherwise expect no header."
+    )
+    parser.add_argument(
+        "--json-input",
+        required=True,
+        help="Path to the existing replication‐task JSON."
+    )
+    parser.add_argument(
+        "--json-output",
+        required=True,
+        help="Where to write the modified replication‐task JSON."
+    )
+
+    args = parser.parse_args()
+
+    # Step 1: Split --pattern into owner/name
+    if "." not in args.pattern:
+        print(
+            f"Error: --pattern must be of the form <schema>.<table_pattern>, got '{args.pattern}'.",
+            file=sys.stderr
+        )
+        sys.exit(1)
+
+    owner_part, name_part = args.pattern.split(".", 1)
+    include_entry = {"owner": owner_part, "name": name_part}
+
+    # Step 2: Read exclude‐CSV, build list of {"owner", "name", "load_order": -1}
+    try:
+        raw_blacklist = load_csv_as_list_of_dicts(
+            args.exclude_csv,
+            has_headers=args.csv_has_headers
+        )
+    except Exception as e:
+        print(f"Error reading exclude CSV '{args.exclude_csv}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    excluded_entries = []
+    for row in raw_blacklist:
+        excluded_entries.append({
+            "owner": row["owner"],
+            "name": row["name"],
+            "load_order": -1
+        })
+
+    # Step 3: (Optional) read explicit‐CSV
+    explicit_entries = None
+    if args.explicit_csv:
+        try:
+            raw_whitelist = load_csv_as_list_of_dicts(
+                args.explicit_csv,
+                has_headers=args.csv_has_headers
+            )
+        except Exception as e:
+            print(f"Error reading explicit CSV '{args.explicit_csv}': {e}", file=sys.stderr)
+            sys.exit(1)
+
+        explicit_entries = []
+        for row in raw_whitelist:
+            explicit_entries.append({
+                "owner": row["owner"],
+                "name": row["name"]
+            })
+
+    # Step 4: Load existing JSON
+    try:
+        with open(args.json_input, "r", encoding="utf-8") as jf:
+            data = json.load(jf)
+    except Exception as e:
+        print(f"Error loading JSON '{args.json_input}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # Navigate to: data["cmd.replication_definition"]["tasks"][0]["source"]["source_tables"]
+    try:
+        task0 = data["cmd.replication_definition"]["tasks"][0]
+        source_tables = task0["source"]["source_tables"]
+    except KeyError:
+        print(
+            "Error: Input JSON does not have the expected structure under "
+            "cmd.replication_definition.tasks[0].source.source_tables",
+            file=sys.stderr
+        )
+        sys.exit(1)
+
+    # ----- A) Set included_pattern to exactly [include_entry] -----
+    source_tables["included_pattern"] = [include_entry]
+
+    # ----- B) Update excluded_pattern -----
+    if "excluded_pattern" not in source_tables or args.exclude_action == "replace":
+        source_tables["excluded_pattern"] = excluded_entries
+    else:
+        existing = source_tables.get("excluded_pattern", [])
+        source_tables["excluded_pattern"] = existing + excluded_entries
+
+    # ----- C) Update explicit_included_tables if requested -----
+    if explicit_entries is not None:
+        if "explicit_included_tables" not in source_tables:
+            source_tables["explicit_included_tables"] = explicit_entries
+        else:
+            if args.explicit_action == "replace":
+                source_tables["explicit_included_tables"] = explicit_entries
+            else:  # merge
+                existing_explicit = source_tables.get("explicit_included_tables", [])
+                source_tables["explicit_included_tables"] = existing_explicit + explicit_entries
+
+    # Step 5: Write out new JSON
+    try:
+        with open(args.json_output, "w", encoding="utf-8") as of:
+            json.dump(data, of, indent=4)
+    except Exception as e:
+        print(f"Error writing output JSON '{args.json_output}': {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"✅ Successfully wrote updated replication JSON to '{args.json_output}'.")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,109 @@
+{
+    "name": "testa__2025-06-02--18-03-54-360679",
+    "cmd.replication_definition": {
+        "tasks": [
+            {
+                "task": {
+                    "name": "testa",
+                    "source_name": "postgres",
+                    "target_names": [
+                        "null"
+                    ]
+                },
+                "source": {
+                    "rep_source": {
+                        "source_name": "postgres",
+                        "database_name": "postgres"
+                    },
+                    "source_tables": {
+                        "name": "postgres"
+                    }
+                },
+                "targets": [
+                    {
+                        "rep_target": {
+                            "target_name": "null",
+                            "target_state": "DISABLED",
+                            "database_name": "null"
+                        }
+                    }
+                ],
+                "task_settings": {
+                    "source_settings": {},
+                    "target_settings": {
+                        "queue_settings": {
+                            "message_shape": {},
+                            "key_shape": {}
+                        },
+                        "ftm_settings": {},
+                        "ddl_handling_policy": {}
+                    },
+                    "sorter_settings": {
+                        "local_transactions_storage": {}
+                    },
+                    "common_settings": {
+                        "change_table_settings": {
+                            "handle_ddl": false,
+                            "header_columns_settings": {}
+                        },
+                        "audit_table_settings": {},
+                        "dr_settings": {},
+                        "statistics_table_settings": {},
+                        "bidi_table_settings": {},
+                        "task_uuid": "27a1e97d-a2b2-ac45-a65b-8e49a2e89af3",
+                        "status_table_settings": {},
+                        "suspended_tables_table_settings": {},
+                        "history_table_settings": {},
+                        "exception_table_settings": {},
+                        "recovery_table_settings": {},
+                        "data_batching_settings": {},
+                        "data_batching_table_settings": {},
+                        "log_stream_settings_depricated": {},
+                        "ddl_history_table_settings": {},
+                        "customized_charset_settings": {
+                            "validation": {
+                                "sub_char": 0
+                            }
+                        }
+                    }
+                }
+            }
+        ],
+        "databases": [
+            {
+                "name": "postgres",
+                "role": "SOURCE",
+                "is_licensed": true,
+                "type_id": "POSTGRESQL_SOURCE_COMPONENT_TYPE",
+                "db_settings": {
+                    "$type": "PostgresqlsourceSettings",
+                    "additionalConnectionProperties": "DSN=localhost",
+                    "username": "postgres",
+                    "password": "{ZA15A5C5CF835364B94A1C5F69AE35CA2996FDCD31F7F1D3B6}",
+                    "server": "localhost",
+                    "database": "qem",
+                    "afterConnectScript": "SELECT usename, useconfig FROM pg_shadow;"
+                },
+                "override_properties": {}
+            },
+            {
+                "name": "null",
+                "role": "TARGET",
+                "is_licensed": true,
+                "type_id": "NULL_TARGET_COMPONENT_TYPE",
+                "db_settings": {
+                    "$type": "NulltargetSettings"
+                },
+                "override_properties": {}
+            }
+        ]
+    },
+    "_version": {
+        "version": "2024.11.0.177",
+        "version_major": 2024,
+        "version_minor": 11,
+        "version_revision": 177,
+        "fips": 0
+    },
+    "description": "Host name: USREM-YAM2.qliktech.com, Time: 2025-06-02 18:03:54.360679"
+}
